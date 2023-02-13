@@ -347,7 +347,10 @@ func fmt_profile_endata(endata_name string, metadata []parser.MultiParam) (strin
 		// fmt.Println("skip encode....")
 		c_encode = ""
 		c_free = ""
-		last_varname = endata_name
+		c_encode = "raw_data_t "+endata_name+"_t = {"+endata_name+", 0};\n"
+		c_encode += endata_name+"_t.size = strlen("+endata_name+");\n"
+		c_encode += "raw_data_t *"+endata_name+"_p = &"+endata_name+"_t;\n"
+		last_varname = endata_name+"_p"
 	} else {
 		c_encode = "raw_data_t *raw_data_"+endata_name+" = base64_de("+endata_name+", strlen("+endata_name+"));\n" + c_encode
 		c_free = "safe_free(&raw_data_"+endata_name+");\n" + c_free
@@ -369,6 +372,23 @@ func fmt_profile_endata(endata_name string, metadata []parser.MultiParam) (strin
 	c_encode = "// encode "+endata_name+" data\n" + c_encode
 
 	return c_encode, c_free, data_storetype
+}
+
+func get_match_string(mini_match_length int, subdata string, profiledata string, is_predata bool) string{
+	match_str := ""
+	for {
+		if (is_predata) {
+			match_str = subdata[len(subdata)-mini_match_length:]
+		} else {
+			match_str = subdata[0:mini_match_length]
+		}
+		if strings.Count(profiledata, match_str) == 1 {
+			break
+		} else {
+			mini_match_length += 1
+		}
+	}
+	return match_str
 }
 
 func fmt_profile_dedata(dedata_name string, metadata []parser.MultiParam) (string, string, string) {
@@ -414,23 +434,31 @@ func fmt_profile_dedata(dedata_name string, metadata []parser.MultiParam) (strin
 		last_varname = "raw_data"
 	}
 	c_payload := ""
+	profile_data := ""
 	if (prepend_data != "") {
-		prepend_data = prepend_data[len(prepend_data)-6:]
+		profile_data = prepend_data
+		prepend_data = get_match_string(6, prepend_data, profile_data, true)
 		c_payload += fmt_go_2_c("pre_data", prepend_data)
 	} else {
 		// fmt.Println("[error]: c2profile -> http-get{ Server { Output { prepend: not found } } }")
 	}
 	if (append_data != "") {
-		append_data = append_data[0:6]
+		profile_data += append_data
+		append_data = get_match_string(6, append_data, profile_data, false)
 		c_payload += fmt_go_2_c("add_data", append_data)
 	}  else {
 		// fmt.Println("[error]: c2profile -> http-get{ Server { Output { prepend: not found } } }")
 	}
 
-    c_payload += "raw_data_t *raw_data = find_payload(rawData, rawData_len, c_pre_data, c_add_data);\n\n"
+	c_payload += "raw_data_t *raw_data = find_payload(rawData, rawData_len, c_pre_data, c_add_data);\n\n"
 
 	c_encode = c_payload + c_encode
-	c_encode += "\nraw_data_t *en_out = base64_en("+last_varname+"->data, "+last_varname+"->size);\n"  
+	if (last_varname == "raw_data") {
+		c_encode += "\nraw_data_t *en_out = raw_data;\n"  
+	} else {
+		c_encode += "\nraw_data_t *en_out = base64_en("+last_varname+"->data, "+last_varname+"->size);\n"  
+		c_free += "safe_free(&raw_data);\n"
+	}
 	
 	return c_encode, c_free, data_storetype
 }
@@ -531,7 +559,7 @@ func fmt_profile_get_client(http_get *parser.HttpGet) string{
 	c_code += "\n"+c_free
 	c_code += "\n"
 	c_code += "*outputData_len = http_body->size;\n"
-    c_code += "*outputData = http_body->data;\n"
+	c_code += "*outputData = http_body->data;\n"
 
 	fmt_c_code := ""
 	for _, i := range strings.Split(c_code, "\n") {
@@ -549,7 +577,7 @@ func fmt_profile_get_server(http_get *parser.HttpGet) string{
 	c_code += "\n"+c_free
 	c_code += "\n"
 	c_code += "*outputData_len = en_out->size;\n"
-    c_code += "*outputData = en_out->data;\n"
+	c_code += "*outputData = en_out->data;\n"
 
 	fmt_c_code := ""
 	for _, i := range strings.Split(c_code, "\n") {
@@ -655,7 +683,7 @@ func fmt_profile_post_client(http_post *parser.HttpPost) string{
 	c_code += c_free
 	c_code += "\n"
 	c_code += "*outputData_len = http_body->size;\n"
-    c_code += "*outputData = http_body->data;\n"
+	c_code += "*outputData = http_body->data;\n"
 
 	fmt_c_code := ""
 	for _, i := range strings.Split(c_code, "\n") {
